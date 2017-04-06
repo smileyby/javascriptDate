@@ -111,7 +111,116 @@ new Date('1992-02-13') //Thu Feb 13 1992 08:00:00 GMT+0800 (中国标准时间)
 
 关于跨浏览器的dataString解析情况，还可以参考这个页面：[http://dygraphs.com/date-formats.html](http://dygraphs.com/date-formats.html)
 
-**所以对于时间字符串对象，个人意见是要么用`RFC2822`形式，要么字节写个解析函数然后随便你传啥格式进来**
+**所以对于时间字符串对象，个人意见是要么用`RFC2822`形式，要么自己写个解析函数然后随便你传啥格式进来**
+
+## 时间格式化效率函数
+
+这里的`时间格式化`指的是将时间字符串传换成毫秒的过程。js原生的时间格式化函数有`Date.parse`、`Date.prototype.valueOf`、`Date.prototype.getTime`、`Number(Date)`、`+Date`（还有个`Date.UTC`方法，然而对参数要求严格，不能直接解析日期字符串，所以略过）
+
+这五个函数从功能上来说一模一样，但是在具体效率如何？我写了一个检测页面，诸位也可以自己测试一下[http://codepen.io/chitanda/pen/NqeZag/](http://codepen.io/chitanda/pen/NqeZag/)
+
+### 核心测试函数：
+
+```javascript
+
+function test(dateString,times,func){
+	var startTime=window.performance.now();
+	// console.log('start='+startTime.getTime());
+	for (var i = 0; i < times; i++) {
+	    func(dateString);//这里填写具体的解析函数
+	};
+	var endTime=window.performance.now();
+	// console.log('endTime='+endTime.getTime());
+	var gapTime=endTime-startTime;
+	  console.log('一共耗时:'+gapTime+'ms');
+	// console.log('时间字符串'+dateString);
+	return gapTime;
+}
+
+```
+
+> 之所以这里用`window.performance.now()`而不用`new Date()`，是因为前者精准度远比后者高。后者只能精确到ms。会对结果造成较大的影响
+
+### 测试结果
+
+单次执行50W次时间格式化函数，并重复测试100次，最后的结果如下：（表格中的数字为单次执行50W次函数的平均结果。单位为毫秒）
+
+<table>
+	<tr>
+		<th>函数</th>
+		<th>Chrome</th>
+		<th>IE</th>
+		<th>Firefox</th>
+	</tr>
+	<tr>
+		<td>Date.parse()</td>
+		<td>151.2087</td>
+		<td>55.5811</td>
+		<td>315.0446</td>
+	</tr>
+	<tr>
+		<td>Date.prototype.getTime()</td>
+		<td>19.5452</td>
+		<td>21.3423</td>
+		<td>14.0169</td>
+	</tr>
+	<tr>
+		<td>Date.prototype.valueOf()</td>
+		<td>20.1696</td>
+		<td>21.7192</td>
+		<td>13.8096</td>
+	</tr>
+	<tr>
+		<td>+Date()</td>
+		<td>20.0044</td>
+		<td>31.3511</td>
+		<td>22.7861</td>
+	</tr>
+	<tr>
+		<td>Number(Date)</td>
+		<td>23.0900</td>
+		<td>24.8838</td>
+		<td>23.3775</td>
+	</tr>
+</table>
+
+从这个表格可以很容易得出以下结论：
+
+> 1. 从计算效率上来说：`Date.prototype.getTime()≈Date.prototype.valueOf()>+Date≈Number(Date)>>Date.parse()`
+> 2. 从代码书写效率上来说，对于少量的时间格式化计算，用`+Date()`或者`Number(Date)`即可。而若页面内有大量该处理，则建议用Date原生的函数`Date.prototype.getTime()`或者`Date.prototype.valueOf()`只有`Date.parse`，找不到任何使用的理由。
+> 3. 这个结果和计算机的计算性能以及浏览器有关，所以具体数字可能有较大偏差，很正常。然而几个函数结果的时间差大小顺序不会变。
+> 4. codepen的在线demo显示比较大，对于这个测试个人建议最好吗源码赋值到本地文件然后进行测试。
+
+## UTC，GMT时间的区别
+
+这个不是啥重要的东西，单纯当课外知识吧
+
+### 格林威治标准时间GMT
+
+GMT即【格林威治标准时间】（Dreenwich Mean Time，简称G.M.T.），指位于英国伦敦郊区的皇家格林威治天文台的标准时间，因为本初子午线被定义为通过哪里的经线。**然而由于地球的不规则自传，导致GMT时间有误差，因此目前不被当做标准时间使用**。
+
+### 时间协调时间UTC
+
+UTC是最主要的世界时间标准，是经过平均太阳时（以格林威治时间GMT为准），地轴运动修正后的新时标准以及以【秒】为单位的国际原子能时所综合精算而成的时间。UTC比GMT来的更加精准。其误差值必须保持在0.9秒以内，若大于0.9秒则由位于巴黎的国际第七自转事务中央局发布闰秒，使用UTC与地球自转周期一直。**不过日常使用中，GMT和UTC的功能与精准度是没有差别的**。
+
+协调世界时区会使用“Z”来表示。而在航空上，所有使用的时间统一规定是协调世界时。而且Z在无线电中应读作“Zulu”（可参考北约音标字母），协调世界时也会被称为“Zulu time”。
+
+## 浏览器回去用户当前时间以及洗好语言
+
+首先需要注意的一点，浏览器获取当前用户所在的失去等信息只和系统的`日期和时间`设置里的时区以及时间有关。`区域和语言`设置影响的是浏览器默认时间函数（Date.prototype.toLocaleString）显示格式，不会对时区等有影响。以Windows为例，`控制面板\时钟、语言和区域`中的两个子设置项目的区别如下：
+
+> `日期和时间`：设置当前用户所处的时间和时区，浏览器获取的结果以此为准，哪怕用户的设置时间和时区是完全错误的。比如若东八区的用户将自己的时区设置为东九区，浏览器就会将视为东九区；时间数据上同理。这里的设置会影响`Date.prototype.getTimezoneOffset、 new Date()`的值
+
+`区域和语言`：主要是设置系统默认的时间显示方式。其子设置的`格式`会影响`Date.prototype.toLocaleString`方法返回的字符串结果。
+
+## 浏览器判断用户本地字符串格式
+
+Date有个`Date.prototype.toLocaleString()`方法可以将时间字符串返回用户本地字符串格式，这个发发还有两个子方法`Date.prototype.toLocaleDateString`和`Date.prototype.toLocaleTimeString`，这两个方法返回值分别表示`日期`和`时间`，加在一起就是`Date.prototype.toLocaleString`的结果。
+
+这个方法的默认参数会对时间字符串做一次转换，将其转换为用户当前所在时区的时间，并按照对应的系统设置时间格式返回字符串结果。**然而不同浏览器对用户本地所使用的语言格式的判断依据是不同的**。
+
+IE：获取系统当前的`区域和语言`-`格式`格式，只按照自己浏览器的结果设置的菜单语言来处理。（比如英文界面则按系统‘en-US’格式返回字符串，中文界面则按照系统‘zh-CN’格式返回结果）综上可得：
+
+> Chrome下**浏览器语言设置优先系统语言设置**。而IE和FF则是**系统语言设置优先浏览器语言设置**，不管浏览器界面语言是什么，他们只依照系统设置来返回格式。
 
 
-未完待续....[1234](https://segmentfault.com/a/1190000003710954)
